@@ -1,0 +1,5 @@
+# The Bouncer: Prevents junk files from uploading to GitHub
+__pycache__/
+*.pyc
+.env
+history.json
