@@ -1,5 +1,9 @@
 {
-  "origin": "",
-  "destination": "",
-  "max_price": 0
+  "origin": "TLV",
+  "destination": "Anywhere",
+  "earliest_departure": "2026-10-01",
+  "latest_return": "2026-10-31",
+  "min_days": 10,
+  "max_days": 14,
+  "max_price_usd": 600
 }

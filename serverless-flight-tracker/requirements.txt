@@ -1,2 +1,2 @@
 # The Dependencies: Lists the Python packages we need
-requests
+requests==2.31.0

@@ -1,1 +1,45 @@
-# The Engine: Tells GitHub to run your code at 12:00 PM
+name: Daily Flight Deal Agent
+
+# 1. THE TRIGGER
+on:
+  schedule:
+    - cron: '0 12 * * *' # Runs every day at 12:00 PM UTC
+  workflow_dispatch:     # Adds a "Run workflow" button so you can test it manually
+
+jobs:
+  run-flight-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 2. GET THE CODE
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 3. SET UP PYTHON
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 4. INSTALL DEPENDENCIES
+      - name: Install Requirements
+        run: pip install -r requirements.txt
+
+      # 5. RUN THE BRAIN (Injecting your locked-down secrets)
+      - name: Run Flight Scanner
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+        run: python agent.py
+
+      # 6. SAVE THE MEMORY (Commit updated history.json)
+      - name: Commit and Push State
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          
+          # This line checks if history.json actually changed before trying to commit
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update flight history database" && git push)
