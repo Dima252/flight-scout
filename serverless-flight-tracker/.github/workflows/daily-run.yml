@@ -25,19 +25,16 @@ jobs:
 
       # 4. INSTALL DEPENDENCIES
       - name: Install Requirements
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       # 5. RUN THE BRAIN (Injecting your locked-down secrets)
       - name: Run Flight Scanner
         env:
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          TEQUILA_API_KEY: ${{ secrets.TEQUILA_API_KEY }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-        run: xvfb-run python agent.py
+        run: python agent.py
 
       # 6. SAVE THE MEMORY (Commit updated history.json)
       - name: Commit and Push State

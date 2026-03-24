@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
@@ -16,65 +17,73 @@ except (FileNotFoundError, json.JSONDecodeError):
     history = []
 
 # --- 2. SETUP SECRETS (From GitHub Actions) ---
-API_KEY = os.environ.get('SERPAPI_KEY')
+API_KEY = os.environ.get('TEQUILA_API_KEY')
 EMAIL_SENDER = os.environ.get('EMAIL_SENDER') # Your Gmail address
 EMAIL_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD')
 EMAIL_RECEIVER = os.environ.get('EMAIL_RECEIVER')
 
-# --- 3. HELPER: GENERATE DATE COMBINATIONS ---
-# This creates pairs of [Outbound Date, Return Date] based on your flexible rules
-def get_date_pairs(start_date_str, end_date_str, min_days, max_days):
+# --- 3. HELPER: GENERATE DATE RANGES ---
+# Kiwi Tequila API expects format DD/MM/YYYY and search windows
+def get_departure_range(start_date_str, end_date_str, min_days):
     start = datetime.strptime(start_date_str, "%Y-%m-%d")
     end = datetime.strptime(end_date_str, "%Y-%m-%d")
-    pairs = []
+    # The latest departure is the end date minus the minimum vacation days
+    latest_departure = end - timedelta(days=min_days)
     
-    current_outbound = start
-    while current_outbound <= end - timedelta(days=min_days):
-        for days in range(min_days, max_days + 1):
-            return_date = current_outbound + timedelta(days=days)
-            if return_date <= end:
-                pairs.append({
-                    "outbound": current_outbound.strftime("%Y-%m-%d"),
-                    "return": return_date.strftime("%Y-%m-%d")
-                })
-        current_outbound += timedelta(days=1)
-    return pairs
+    return start.strftime("%d/%m/%Y"), latest_departure.strftime("%d/%m/%Y")
 
 # --- 4. SEARCH FLIGHTS ---
-from google_flight_analysis.scrape import Scrape, ScrapeObjects
-
 new_deals_found = []
-date_pairs = get_date_pairs(config['earliest_departure'], config['latest_return'], config['min_days'], config['max_days'])
 
-print(f"Checking {len(date_pairs)} date combinations...")
+date_from, date_to = get_departure_range(config['earliest_departure'], config['latest_return'], config['min_days'])
+print(f"Searching flights departing between {date_from} and {date_to}...")
 
-# We check all valid date combinations over the period
-for dates in date_pairs: 
-    try:
-        dest = config['destination'] if config['destination'] != "Anywhere" else "CDG"
-        print(f"Scraping flights from {config['origin']} to {dest} ({dates['outbound']} -> {dates['return']})")
+params = {
+    "fly_from": config['origin'],
+    "date_from": date_from,
+    "date_to": date_to,
+    "nights_in_dst_from": config['min_days'],
+    "nights_in_dst_to": config['max_days'],
+    "flight_type": "round",
+    "curr": "USD",
+    "price_to": config['max_price_usd'],
+    "max_stopovers": 2, # Cap stopovers to avoid highly extreme flights
+}
+
+if config['destination'].lower() != "anywhere":
+    params["fly_to"] = config['destination']
+
+headers = {
+    "apikey": API_KEY
+}
+
+try:
+    if not API_KEY:
+        print("Warning: TEQUILA_API_KEY is missing! The request will likely fail.")
         
-        result = Scrape(config['origin'], dest, dates['outbound'], dates['return'])
-        ScrapeObjects(result)
+    response = requests.get("https://api.tequila.kiwi.com/v2/search", headers=headers, params=params)
+    response.raise_for_status()
+    results = response.json().get('data', [])
+    
+    for flight in results:
+        price = flight.get('price', 9999)
+        airline = flight.get('airlines', ['Unknown'])[0]
+        destination = flight.get('cityTo', 'Unknown')
         
-        df = result.data
-        if not df.empty:
-            for index, row in df.iterrows():
-                try:
-                    price = int(row['Price'])
-                    airline = str(row['Airline'])
-                    # Generate a unique token since we no longer have SerpAPI's flight_token
-                    flight_token = f"{dates['outbound']}_{dates['return']}_{airline}_{price}"
-                    
-                    if price <= config['max_price_usd'] and flight_token not in history:
-                        deal_msg = f"DEAL: {airline} | {dates['outbound']} to {dates['return']} | ${price}"
-                        new_deals_found.append(deal_msg)
-                        history.append(flight_token)
-                except (ValueError, KeyError) as e:
-                    print(f"Error parsing row: {e}")
-                    
-    except Exception as e:
-        print(f"Error scraping {dates['outbound']} to {dates['return']}: {e}")
+        # Parse Dates
+        out_date = flight['route'][0]['local_departure'].split('T')[0]
+        ret_date = flight['route'][-1]['local_arrival'].split('T')[0]
+        
+        flight_token = flight.get('id', f"{out_date}_{ret_date}_{airline}_{price}")
+        
+        # Check if it's under budget AND we haven't seen it before
+        if price <= config['max_price_usd'] and flight_token not in history:
+            deal_msg = f"DEAL: {airline} to {destination} | {out_date} to {ret_date} | ${price}"
+            new_deals_found.append(deal_msg)
+            history.append(flight_token)
+            
+except Exception as e:
+    print(f"Error scraping Tequila API: {e}")
 
 # --- 5. SEND EMAIL ALERT & SAVE STATE ---
 if new_deals_found:
@@ -85,7 +94,7 @@ if new_deals_found:
     msg['Subject'] = f"✈️ Flight Deal Alert: Found {len(new_deals_found)} new flights!"
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
-    msg.set_content("\n".join(new_deals_found) + "\n\nBook via Google Flights!")
+    msg.set_content("\n".join(new_deals_found) + "\n\nBook via Kiwi.com / Airlines!")
 
     # Send Email via Gmail SMTP
     if EMAIL_SENDER and EMAIL_PASSWORD:
