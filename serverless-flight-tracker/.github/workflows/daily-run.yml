@@ -9,6 +9,8 @@ on:
 jobs:
   run-flight-agent:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       # 2. GET THE CODE
@@ -23,7 +25,10 @@ jobs:
 
       # 4. INSTALL DEPENDENCIES
       - name: Install Requirements
-        run: pip install -r requirements.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          pip install -r requirements.txt
 
       # 5. RUN THE BRAIN (Injecting your locked-down secrets)
       - name: Run Flight Scanner
@@ -32,7 +37,7 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-        run: python agent.py
+        run: xvfb-run python agent.py
 
       # 6. SAVE THE MEMORY (Commit updated history.json)
       - name: Commit and Push State

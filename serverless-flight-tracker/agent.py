@@ -1,6 +1,5 @@
 import os
 import json
-import requests
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
@@ -42,38 +41,40 @@ def get_date_pairs(start_date_str, end_date_str, min_days, max_days):
     return pairs
 
 # --- 4. SEARCH FLIGHTS ---
+from google_flight_analysis.scrape import Scrape, ScrapeObjects
+
 new_deals_found = []
 date_pairs = get_date_pairs(config['earliest_departure'], config['latest_return'], config['min_days'], config['max_days'])
 
-# We will just check the first 3 valid date combinations per day to save API credits
-for dates in date_pairs[:3]: 
-    params = {
-        "engine": "google_flights",
-        "departure_id": config['origin'],
-        "arrival_id": config['destination'] if config['destination'] != "Anywhere" else "CDG", # Fallback to a major hub if Anywhere isn't supported
-        "outbound_dates": dates['outbound'],
-        "return_dates": dates['return'],
-        "currency": "USD",
-        "hl": "en",
-        "api_key": API_KEY
-    }
+print(f"Checking {len(date_pairs)} date combinations...")
 
-    response = requests.get("https://serpapi.com/search", params=params)
-    results = response.json()
-
-    # Parse the best flights from Google
-    best_flights = results.get("best_flights", [])
-    
-    for flight in best_flights:
-        price = flight.get("price", 9999)
-        airline = flight["flights"][0]["airline"]
-        flight_token = flight.get("flight_token", "") # Unique ID for the flight
+# We check all valid date combinations over the period
+for dates in date_pairs: 
+    try:
+        dest = config['destination'] if config['destination'] != "Anywhere" else "CDG"
+        print(f"Scraping flights from {config['origin']} to {dest} ({dates['outbound']} -> {dates['return']})")
         
-        # Check if it's under budget AND we haven't seen it before
-        if price <= config['max_price_usd'] and flight_token not in history:
-            deal_msg = f"DEAL: {airline} | {dates['outbound']} to {dates['return']} | ${price}"
-            new_deals_found.append(deal_msg)
-            history.append(flight_token)
+        result = Scrape(config['origin'], dest, dates['outbound'], dates['return'])
+        ScrapeObjects(result)
+        
+        df = result.data
+        if not df.empty:
+            for index, row in df.iterrows():
+                try:
+                    price = int(row['Price'])
+                    airline = str(row['Airline'])
+                    # Generate a unique token since we no longer have SerpAPI's flight_token
+                    flight_token = f"{dates['outbound']}_{dates['return']}_{airline}_{price}"
+                    
+                    if price <= config['max_price_usd'] and flight_token not in history:
+                        deal_msg = f"DEAL: {airline} | {dates['outbound']} to {dates['return']} | ${price}"
+                        new_deals_found.append(deal_msg)
+                        history.append(flight_token)
+                except (ValueError, KeyError) as e:
+                    print(f"Error parsing row: {e}")
+                    
+    except Exception as e:
+        print(f"Error scraping {dates['outbound']} to {dates['return']}: {e}")
 
 # --- 5. SEND EMAIL ALERT & SAVE STATE ---
 if new_deals_found:
@@ -87,9 +88,16 @@ if new_deals_found:
     msg.set_content("\n".join(new_deals_found) + "\n\nBook via Google Flights!")
 
     # Send Email via Gmail SMTP
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        smtp.send_message(msg)
+    if EMAIL_SENDER and EMAIL_PASSWORD:
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+                smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                smtp.send_message(msg)
+        except Exception as e:
+            print(f"Failed to send email: {e}")
+    else:
+        print("Skipping email sending because credentials aren't set in the local environment.")
+        print(f"Would have sent:\n{msg.get_content()}")
         
     # Overwrite history.json with the newly found flight tokens
     with open('history.json', 'w') as f:

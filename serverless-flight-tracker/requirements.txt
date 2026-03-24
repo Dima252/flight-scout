@@ -1,2 +1,3 @@
 # The Dependencies: Lists the Python packages we need
-requests==2.31.0
+google-flight-analysis==1.2.0
+pandas
