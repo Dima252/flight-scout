@@ -4,17 +4,29 @@ import requests
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 # --- 1. LOAD CONFIGURATION & STATE ---
-with open('config.json', 'r') as f:
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.json')
+HISTORY_PATH = os.path.join(SCRIPT_DIR, 'history.json')
+ENV_PATH = os.path.join(SCRIPT_DIR, '.env')
+
+# Load local environment variables from .env
+load_dotenv(ENV_PATH)
+
+with open(CONFIG_PATH, 'r') as f:
     config = json.load(f)
 
 # If history.json doesn't exist or is empty, start with an empty list
+history: list[str] = []
 try:
-    with open('history.json', 'r') as f:
-        history = json.load(f)
+    with open(HISTORY_PATH, 'r') as f:
+        data = json.load(f)
+        if isinstance(data, list):
+            history.extend(data)
 except (FileNotFoundError, json.JSONDecodeError):
-    history = []
+    pass
 
 # --- 2. SETUP SECRETS (From GitHub Actions) ---
 API_KEY = os.environ.get('TEQUILA_API_KEY')
@@ -74,7 +86,7 @@ try:
         out_date = flight['route'][0]['local_departure'].split('T')[0]
         ret_date = flight['route'][-1]['local_arrival'].split('T')[0]
         
-        flight_token = flight.get('id', f"{out_date}_{ret_date}_{airline}_{price}")
+        flight_token = str(flight.get('id', f"{out_date}_{ret_date}_{airline}_{price}"))
         
         # Check if it's under budget AND we haven't seen it before
         if price <= config['max_price_usd'] and flight_token not in history:
@@ -109,7 +121,7 @@ if new_deals_found:
         print(f"Would have sent:\n{msg.get_content()}")
         
     # Overwrite history.json with the newly found flight tokens
-    with open('history.json', 'w') as f:
+    with open(HISTORY_PATH, 'w') as f:
         json.dump(history, f, indent=2)
 else:
     print("No new deals found today under the target price.")

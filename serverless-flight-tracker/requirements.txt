@@ -1,2 +1,3 @@
 # The Dependencies: Lists the Python packages we need
 requests
+python-dotenv
